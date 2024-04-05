@@ -38,6 +38,7 @@
 #include <omp.h>
 #include <math.h>
 #include <stdint.h>
+#include<x86intrin.h>
 
 /* the following two definitions of DEBUGGING control whether or not
    debugging information is written out. To put the program into
@@ -340,6 +341,11 @@ int main(int argc, char ** argv)
   struct timeval start_time;
   struct timeval stop_time;
 
+
+  // var declarations for outputting david's time
+  struct timeval start_time_david, stop_time_david;
+  long long david_conv_time;
+
   if ( argc != 6 ) {
     fprintf(stderr, "Usage: conv-harness <image_width> <image_height> <kernel_order> <number of channels> <number of kernels>\n");
     exit(1);
@@ -371,27 +377,36 @@ int main(int argc, char ** argv)
 
   //DEBUGGING(write_out(A, a_dim1, a_dim2));
 
-  /* use a simple multichannel convolution routine to produce control result */
-  multichannel_conv(image, kernels, control_output, width,
-                    height, nchannels, nkernels, kernel_order);
+  /* record starting time of David's convolution */
+  gettimeofday(&start_time_david, NULL);
 
-  /* record starting time of student's code*/
+  /* use a simple multichannel convolution routine to produce control result */
+  multichannel_conv(image, kernels, control_output, width, height, nchannels, nkernels, kernel_order);
+
+  /* record finishing time of David's convolution */
+  gettimeofday(&stop_time_david, NULL);
+  david_conv_time = (stop_time_david.tv_sec - start_time_david.tv_sec) * 1000000L + (stop_time_david.tv_usec - start_time_david.tv_usec);
+  
+  /* record starting time of student's code */
   gettimeofday(&start_time, NULL);
 
   /* perform student's multichannel convolution */
-  student_conv(image, kernels, output, width,
-                    height, nchannels, nkernels, kernel_order);
+  student_conv(image, kernels, output, width, height, nchannels, nkernels, kernel_order);
 
   /* record finishing time */
   gettimeofday(&stop_time, NULL);
-  mul_time = (stop_time.tv_sec - start_time.tv_sec) * 1000000L +
-    (stop_time.tv_usec - start_time.tv_usec);
+  mul_time = (stop_time.tv_sec - start_time.tv_sec) * 1000000L + (stop_time.tv_usec - start_time.tv_usec);
+  
+  // Print David's and Student's convolution times
+  printf("David's conv time: %lld microseconds\n", david_conv_time);
   printf("Student conv time: %lld microseconds\n", mul_time);
+  
+  // Calculate and print the speed-up and time saved
+  double speedUp = (double)david_conv_time / (double)mul_time;
+  long long timeSaved = david_conv_time - mul_time;
+  printf("The total speed up was %.2fx and %lld microseconds less.\n", speedUp, timeSaved);
 
-  DEBUGGING(write_out(output, nkernels, width, height));
-
-  /* now check that the student's multichannel convolution routine
-     gives the same answer as the known working version */
+  // Check the result's accuracy
   check_result(output, control_output, nkernels, width, height);
 
   return 0;
