@@ -1,3 +1,11 @@
+/* CSU33014 Concurrent Systems I - Lab 2
+ * Team members:
+ * - Faith Olopade <olopadef@tcd.ie> <TCD 21364066>
+ * - Darius Pop    <dpop@tcd.ie>     <TCD 21367524>
+ * - Leah Weldon   <weldonl@tcd.ie>  <TCD 21363670>
+*/
+
+
 /* Test and timing harness program for developing a multichannel
    multikernel convolution (as used in deep learning networks)
 
