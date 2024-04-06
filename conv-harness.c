@@ -329,11 +329,53 @@ void student_conv(float *** image, int16_t **** kernels, float *** output,
                int width, int height, int nchannels, int nkernels,
                int kernel_order)
 {
-  // this call here is just dummy code that calls the slow, simple, correct version.
-  // insert your own code instead
-  multichannel_conv(image, kernels, output, width,
-                    height, nchannels, nkernels, kernel_order);
+   // Parallelize over the number of kernels to leverage multi-core processing.
+    #pragma omp parallel for schedule(dynamic)
+    for (int kernel_idx = 0; kernel_idx < nkernels; kernel_idx++) {
+        float kernel_transposed[kernel_order][kernel_order][nchannels];
+
+        // Pre-process the kernel: transpose and convert to float for SIMD.
+        for (int x = 0; x < kernel_order; ++x) {
+            for (int y = 0; y < kernel_order; ++y) {
+                for (int channel = 0; channel < nchannels; ++channel) {
+                    kernel_transposed[x][y][channel] = (float)kernels[kernel_idx][channel][x][y];
+                }
+            }
+        }
+
+        // Process each pixel of the image.
+        for (int i = 0; i < width; ++i) {
+            for (int j = 0; j < height; ++j) {
+                __m128d sum_vector_lo = _mm_setzero_pd();
+                __m128d sum_vector_hi = _mm_setzero_pd();
+
+                // Apply the kernel to the current pixel.
+                for (int ki = 0; ki < kernel_order; ++ki) {
+                    for (int kj = 0; kj < kernel_order; ++kj) {
+                        for (int channel = 0; channel < nchannels; channel += 32) {
+                            // Use SSE to multiply 4 channels at once.
+                            for (int group = 0; group < 8; ++group) {
+                                __m128 pixel_vals = _mm_loadu_ps(&image[i + ki][j + kj][channel + group * 4]);
+                                __m128 kernel_vals = _mm_load_ps(&kernel_transposed[ki][kj][channel + group * 4]);
+                                __m128 mult_res = _mm_mul_ps(pixel_vals, kernel_vals);
+
+                                // Accumulate results.
+                                sum_vector_lo = _mm_add_pd(sum_vector_lo, _mm_cvtps_pd(mult_res));
+                                sum_vector_hi = _mm_add_pd(sum_vector_hi, _mm_cvtps_pd(_mm_movehl_ps(mult_res, mult_res)));
+                            }
+                        }
+                    }
+                }
+
+                // Finalize the sum and store the result.
+                __m128d sum = _mm_add_pd(sum_vector_lo, sum_vector_hi);
+                sum = _mm_hadd_pd(sum, sum);
+                _mm_store_ss(&output[kernel_idx][i][j], _mm_cvtpd_ps(sum));
+            }
+        }
+    }
 }
+
 
 int main(int argc, char ** argv)
 {
