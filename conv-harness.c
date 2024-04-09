@@ -329,51 +329,64 @@ void student_conv(float *** image, int16_t **** kernels, float *** output,
                int width, int height, int nchannels, int nkernels,
                int kernel_order)
 {
-   // Parallelize over the number of kernels to leverage multi-core processing.
-    #pragma omp parallel for schedule(dynamic)
-    for (int kernel_idx = 0; kernel_idx < nkernels; kernel_idx++) {
-        float kernel_transposed[kernel_order][kernel_order][nchannels];
+    // target machine has 64-thread capability so we take advantage of this to process multiple kernels in parallel
+	#pragma omp parallel for
+	for (int kernel_idx = 0; kernel_idx < nkernels; kernel_idx++) {
+        
+        // convert and rearrange kernel data from int16 to float and align for efficient memory access and SSE processing
+        // transformation allows contiguous memory access and aligns data for vectorized operations
+		__attribute__ ((aligned(16))) float kernel[kernel_order][kernel_order][nchannels];
+		for (int kx = 0; kx < kernel_order; kx++) {
+			for (int ky = 0; ky < kernel_order; ky++) {
+				
+                // loop unroll to enhance performance as number of channels is multiple of 32
+				#pragma GCC unroll 32
+				for (int channel = 0; channel < nchannels; channel++) {
+					kernel[kx][ky][channel] = kernels[kernel_idx][channel][kx][ky];
+				}
+			}
+		}
 
-        // Pre-process the kernel: transpose and convert to float for SIMD.
-        for (int x = 0; x < kernel_order; ++x) {
-            for (int y = 0; y < kernel_order; ++y) {
-                for (int channel = 0; channel < nchannels; ++channel) {
-                    kernel_transposed[x][y][channel] = (float)kernels[kernel_idx][channel][x][y];
-                }
-            }
-        }
+        // iterate over each pixel in output image to compute convolution results
+		for (int pw = 0; pw < width; pw++) {
+			for (int ph = 0; ph < height; ph++) {
 
-        // Process each pixel of the image.
-        for (int i = 0; i < width; ++i) {
-            for (int j = 0; j < height; ++j) {
-                __m128d sum_vector_lo = _mm_setzero_pd();
-                __m128d sum_vector_hi = _mm_setzero_pd();
+                // init sum vectors for parallel accumulation of convolution results using SSE intstructions
+				__m128d sum_vector_lo = _mm_setzero_pd();
+				__m128d sum_vector_hi = _mm_setzero_pd();
 
-                // Apply the kernel to the current pixel.
-                for (int ki = 0; ki < kernel_order; ++ki) {
-                    for (int kj = 0; kj < kernel_order; ++kj) {
-                        for (int channel = 0; channel < nchannels; channel += 32) {
-                            // Use SSE to multiply 4 channels at once.
-                            for (int group = 0; group < 8; ++group) {
-                                __m128 pixel_vals = _mm_loadu_ps(&image[i + ki][j + kj][channel + group * 4]);
-                                __m128 kernel_vals = _mm_load_ps(&kernel_transposed[ki][kj][channel + group * 4]);
-                                __m128 mult_res = _mm_mul_ps(pixel_vals, kernel_vals);
+                // process each pixel within kernel's dimensions    
+				for (int kx = 0; kx < kernel_order; kx++) {
+					for (int ky = 0; ky < kernel_order; ky++) {
 
-                                // Accumulate results.
-                                sum_vector_lo = _mm_add_pd(sum_vector_lo, _mm_cvtps_pd(mult_res));
-                                sum_vector_hi = _mm_add_pd(sum_vector_hi, _mm_cvtps_pd(_mm_movehl_ps(mult_res, mult_res)));
-                            }
-                        }
-                    }
-                }
+						// as nchannels is divisible by 32 we can optimise this loop to operate on 32 channels using SIMD instructions
+						for (int channel = 0; channel < nchannels; channel += 32) {
 
-                // Finalize the sum and store the result.
-                __m128d sum = _mm_add_pd(sum_vector_lo, sum_vector_hi);
-                sum = _mm_hadd_pd(sum, sum);
-                _mm_store_ss(&output[kernel_idx][i][j], _mm_cvtpd_ps(sum));
-            }
-        }
-    }
+							// process 4 channels at once using SSE to exploit data paralleslism we perform 32/4 = 8 iterations.
+							#pragma GCC unroll 8
+							for (int group = 0; group < 8; group++) {
+
+								// process 4 channels at once using SSE intrinsics we load contiguous image and kernel data into SSE registers 
+                                // perform multiplication and accumulate the result
+								__m128 img4 = _mm_loadu_ps(&image[pw+kx][ph+ky][channel + group * 4]);
+								__m128 krn4 = _mm_load_ps(&kernel[kx][ky][channel + group * 4]);
+								__m128 mul4 = _mm_mul_ps(img4, krn4);
+
+								// float results into double sum
+								sum_vector_lo = _mm_add_pd(sum_vector_lo, _mm_cvtps_pd(mul4));
+								sum_vector_hi = _mm_add_pd(sum_vector_hi, _mm_cvtps_pd(_mm_movehl_ps(mul4, mul4)));
+							}
+						}
+					}
+				}
+
+				// write output as float and store in output image
+				__m128d sums = _mm_add_pd(sum_vector_lo, sum_vector_hi);
+				__m128d sum = _mm_hadd_pd(sums, sums);
+				_mm_store_ss(&output[kernel_idx][pw][ph], _mm_cvtpd_ps(sum));
+			}
+		}
+	}
 }
 
 
@@ -427,29 +440,29 @@ int main(int argc, char ** argv)
 
   //DEBUGGING(write_out(A, a_dim1, a_dim2));
 
+  printf("Starting computation\n");
+
   /* record starting time of David's convolution */
   gettimeofday(&start_time_david, NULL);
-
   /* use a simple multichannel convolution routine to produce control result */
   multichannel_conv(image, kernels, control_output, width, height, nchannels, nkernels, kernel_order);
-
   /* record finishing time of David's convolution */
   gettimeofday(&stop_time_david, NULL);
   david_conv_time = (stop_time_david.tv_sec - start_time_david.tv_sec) * 1000000L + (stop_time_david.tv_usec - start_time_david.tv_usec);
-  
+  printf("David's conv time: %lld microseconds\n", david_conv_time);
+  DEBUGGING(write_out(control_output, nkernels, width, height));
+
+
   /* record starting time of student's code */
   gettimeofday(&start_time, NULL);
-
   /* perform student's multichannel convolution */
   student_conv(image, kernels, output, width, height, nchannels, nkernels, kernel_order);
-
   /* record finishing time */
   gettimeofday(&stop_time, NULL);
   mul_time = (stop_time.tv_sec - start_time.tv_sec) * 1000000L + (stop_time.tv_usec - start_time.tv_usec);
-  
   // Print David's and Student's convolution times
-  printf("David's conv time: %lld microseconds\n", david_conv_time);
   printf("Student conv time: %lld microseconds\n", mul_time);
+  DEBUGGING(write_out(output, nkernels, width, height));
   
   // Calculate and print the speed-up and time saved
   double speedUp = (double)david_conv_time / (double)mul_time;
