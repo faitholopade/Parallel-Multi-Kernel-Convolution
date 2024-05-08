@@ -27,5 +27,8 @@ To compile with SSE on stoker you should:
 - compile your program with: gcc -O3 -msse4 file.c
 To compile with OpenMP, add the flag -fopenmp.
 
-Note that this assignment should be completed in pairs of students. The idea of working in pairs is that students might have the opportunity to bounce ideas and plans off another person and share the work, while avoiding the worst problems of group projects where just one or two people do most of the work. The ideal number of students in a pair is two, but pairs with one, two or three students are acceptable.
-Every student in the pair should submit the same identical files to Blackboard as their solution. Please make sure that every source file and document that you submit for the lab should have the names of all students who are in the pair displayed prominently at the start of the document (in a comment in source files). When I look at each submitted file, it should be easy for me to find who is the other member of the pair.
+
+Team members:
+Faith Olopade <olopadef@tcd.ie> <TCD 21364066>
+Darius Pop    <dpop@tcd.ie>     <TCD 21367524>
+Leah Weldon   <weldonl@tcd.ie>  <TCD 21363670>
