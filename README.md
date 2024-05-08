@@ -29,6 +29,6 @@ To compile with OpenMP, add the flag -fopenmp.
 
 
 Team members:
-Faith Olopade <olopadef@tcd.ie> <TCD 21364066>
-Darius Pop    <dpop@tcd.ie>     <TCD 21367524>
-Leah Weldon   <weldonl@tcd.ie>  <TCD 21363670>
+- Faith Olopade <olopadef@tcd.ie> 
+- Darius Pop    <dpop@tcd.ie>     
+- Leah Weldon   <weldonl@tcd.ie>  
